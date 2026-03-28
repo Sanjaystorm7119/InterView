@@ -1,0 +1,88 @@
+# ===== ENVIRONMENT & SECRETS =====
+.env
+.env.*
+*.env
+*env*
+!.env.example
+!.env.sample
+
+# ===== NODE / FRONTEND =====
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/.turbo/
+frontend/.vercel/
+frontend/build/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnpm-debug.log*
+
+# Next.js
+.next/
+out/
+
+# ===== PYTHON / BACKEND =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+wheels/
+pip-wheel-metadata/
+.installed.cfg
+MANIFEST
+venv/
+.venv/
+env/
+ENV/
+.Python
+backend/.env
+backend/__pycache__/
+
+# Alembic (keep migrations, ignore cache)
+backend/alembic/__pycache__/
+backend/alembic/versions/__pycache__/
+
+# ===== DATABASE =====
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== LOGS =====
+*.log
+logs/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== IDE / EDITORS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.user
+
+# ===== CLAUDE CODE =====
+.claude/
+**/.claude/
+
+# ===== MISC =====
+.cache/
+.temp/
+*.tsbuildinfo
