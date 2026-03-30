@@ -3,14 +3,23 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { SidebarOptions } from "@/constants/uiConstants";
-import { LogOut, Menu, X } from "lucide-react";
-import { useState } from "react";
+import { LogOut, Menu, X, Bell } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useNotifications, AppNotification } from "@/hooks/useNotifications";
 
 export default function AppSideBar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    setToken(localStorage.getItem("access_token"));
+  }, []);
+
+  const { notifications, unreadCount, markAllRead, clearAll } = useNotifications(token);
 
   const handleLogout = () => {
     logout();
@@ -19,9 +28,58 @@ export default function AppSideBar() {
 
   const nav = (
     <>
-      <div className="p-6 border-b border-slate-700">
-        <h1 className="text-2xl font-bold text-amber-400">HireEva</h1>
-        <p className="text-xs text-slate-400 mt-1">AI Recruitment</p>
+      <div className="p-6 border-b border-slate-700 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-amber-400">HireEva</h1>
+          <p className="text-xs text-slate-400 mt-1">AI Recruitment</p>
+        </div>
+        <div className="relative">
+          <button
+            onClick={() => { setNotifOpen((v) => !v); if (!notifOpen) markAllRead(); }}
+            className="relative p-1.5 text-slate-400 hover:text-white transition-colors"
+            aria-label="Notifications"
+          >
+            <Bell className="w-5 h-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </button>
+
+          {notifOpen && (
+            <div className="absolute left-0 top-10 w-72 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
+                <span className="text-xs font-semibold text-slate-300">Notifications</span>
+                {notifications.length > 0 && (
+                  <button onClick={clearAll} className="text-[10px] text-slate-400 hover:text-white">Clear all</button>
+                )}
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">No notifications yet</p>
+                ) : (
+                  notifications.map((n: AppNotification) => (
+                    <Link
+                      key={n.id}
+                      href={`/scheduled-interview/${n.interview_id}/details`}
+                      onClick={() => setNotifOpen(false)}
+                      className="block px-3 py-2.5 hover:bg-slate-700 border-b border-slate-700/50 last:border-0"
+                    >
+                      <p className="text-xs text-slate-200 font-medium truncate">
+                        {n.candidate_name} completed an interview
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate">{n.job_position}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        {new Date(n.timestamp).toLocaleTimeString()}
+                      </p>
+                    </Link>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <nav className="flex-1 p-4 space-y-1">

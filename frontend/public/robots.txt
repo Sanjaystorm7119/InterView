@@ -1,0 +1,23 @@
+User-agent: *
+
+# Block candidate interview pages (contain private interview sessions)
+Disallow: /interview/
+
+# Block auth pages
+Disallow: /login
+Disallow: /register
+
+# Block recruiter dashboard (requires authentication anyway)
+Disallow: /dashboard/
+Disallow: /all-interview/
+Disallow: /scheduled-interview/
+Disallow: /resume-bank/
+Disallow: /job-details-bank/
+Disallow: /resume-matcher/
+Disallow: /settings/
+Disallow: /analytics/
+
+# Allow the homepage
+Allow: /
+
+Sitemap: http://localhost:3000/sitemap.xml

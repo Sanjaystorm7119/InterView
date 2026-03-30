@@ -5,9 +5,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const api = axios.create({
   baseURL: API_URL,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true, // Send httpOnly cookies automatically
 });
 
-// Attach JWT token to every request
+// Attach JWT from localStorage as Authorization header (backward compatible fallback)
+// Cookies are the primary auth mechanism; this supports contexts where cookies aren't set yet
 api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("access_token");
@@ -28,22 +30,34 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem("refresh_token");
-        if (!refreshToken) throw new Error("No refresh token");
+        const refreshToken = typeof window !== "undefined"
+          ? localStorage.getItem("refresh_token")
+          : null;
 
-        const { data } = await axios.post(`${API_URL}/api/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
+        // Try cookie-based refresh first (empty body), fall back to body token
+        const { data } = await axios.post(
+          `${API_URL}/api/auth/refresh`,
+          { refresh_token: refreshToken || "" },
+          { withCredentials: true },
+        );
 
-        localStorage.setItem("access_token", data.access_token);
-        localStorage.setItem("refresh_token", data.refresh_token);
+        // Keep localStorage in sync for the Authorization header fallback
+        if (typeof window !== "undefined") {
+          localStorage.setItem("access_token", data.access_token);
+          localStorage.setItem("refresh_token", data.refresh_token);
+          if (data.user) {
+            localStorage.setItem("user", JSON.stringify(data.user));
+          }
+        }
 
         originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
         return api(originalRequest);
       } catch {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        localStorage.removeItem("user");
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("access_token");
+          localStorage.removeItem("refresh_token");
+          localStorage.removeItem("user");
+        }
         window.location.href = "/login";
         return Promise.reject(error);
       }

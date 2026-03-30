@@ -91,3 +91,4 @@ class SaveTranscriptRequest(BaseModel):
     callId: str
     interviewId: str
     userEmail: str
+    userName: str = ""

@@ -10,6 +10,7 @@ import {
   Settings,
   User,
   User2,
+  BarChart2,
 } from "lucide-react";
 
 export const SidebarOptions = [
@@ -19,6 +20,7 @@ export const SidebarOptions = [
   { name: "Resume Bank", icon: FileText, path: "/resume-bank" },
   { name: "Job Details Bank", icon: BriefcaseBusiness, path: "/job-details-bank" },
   { name: "Resume Matcher", icon: GitCompare, path: "/resume-matcher" },
+  { name: "Analytics", icon: BarChart2, path: "/analytics" },
   { name: "Settings", icon: Settings, path: "/settings" },
 ];
 

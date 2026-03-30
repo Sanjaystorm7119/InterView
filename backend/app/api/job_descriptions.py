@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_, cast, Text
 
 from app.database import get_db
 from app.models.user import User
@@ -35,13 +35,22 @@ def create_job_description(
 def list_job_descriptions(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
+    search: str = Query("", max_length=200),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    query = db.query(JobDescription).filter(JobDescription.user_email == current_user.email)
+    if search.strip():
+        term = f"%{search.strip().lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(JobDescription.role_title).like(term),
+                func.lower(JobDescription.raw_text).like(term),
+                func.lower(cast(JobDescription.parsed_data, Text)).like(term),
+            )
+        )
     jds = (
-        db.query(JobDescription)
-        .filter(JobDescription.user_email == current_user.email)
-        .order_by(JobDescription.created_at.desc())
+        query.order_by(JobDescription.created_at.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()

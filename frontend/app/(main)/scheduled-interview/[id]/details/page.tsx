@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ArrowLeft, Copy, Mail, MessageSquare, Star, User } from "lucide-react";
+import { ArrowLeft, Copy, Download, Mail, MessageSquare, Star, User } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import moment from "moment";
@@ -37,6 +37,39 @@ export default function InterviewDetailsPage() {
 
   const ratingColor = (v: number) => (v >= 7 ? "bg-green-500" : v >= 4 ? "bg-amber-500" : "bg-red-500");
 
+  const exportCSV = () => {
+    if (!feedbacks.length) return;
+    const headers = [
+      "Candidate Name", "Email", "Overall Score", "Technical Skills",
+      "Communication", "Problem Solving", "Experience", "Recommendation",
+      "Date",
+    ];
+    const rows = feedbacks.map((fb) => {
+      const rating = fb.feedback?.feedback?.rating || {};
+      const rec = fb.feedback?.feedback?.Recommendation || "";
+      return [
+        fb.user_name || "",
+        fb.user_email || "",
+        rating.OverallRating ?? "",
+        rating.TechnicalSkills ?? "",
+        rating.Communication ?? "",
+        rating.ProblemSolving ?? "",
+        rating.Experience ?? "",
+        rec,
+        new Date(fb.created_at).toLocaleDateString(),
+      ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
+    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${interview?.job_position || "interview"}_candidates.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("CSV exported");
+  };
+
   if (!interview) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500" /></div>;
 
   return (
@@ -47,6 +80,9 @@ export default function InterviewDetailsPage() {
           <h1 className="text-2xl font-bold">{interview.job_position}</h1>
           <p className="text-gray-500">{interview.company_name} &middot; {interview.duration} min</p>
         </div>
+        <Button variant="outline" size="sm" onClick={exportCSV} disabled={feedbacks.length === 0}>
+          <Download className="w-4 h-4 mr-2" /> Export CSV
+        </Button>
         <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(interviewLink); toast.success("Link copied!"); }}>
           <Copy className="w-4 h-4 mr-2" /> Copy Link
         </Button>

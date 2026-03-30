@@ -1,25 +1,34 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Upload, Trash2, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Upload, Trash2, Loader2, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 export default function JobDetailsBankPage() {
   const [jds, setJds] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [filters, setFilters] = useState({ company: "", role: "", keyword: "" });
+  const [search, setSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => { loadJds(); }, []);
+  useEffect(() => { loadJds(search); }, []);
 
-  const loadJds = async () => {
+  const loadJds = async (q = "") => {
     try {
-      const { data } = await api.get("/api/job-descriptions/");
+      const params = q.trim() ? `?search=${encodeURIComponent(q.trim())}` : "";
+      const { data } = await api.get(`/api/job-descriptions/${params}`);
       setJds(data);
     } catch { /* ignore */ }
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => loadJds(value), 400);
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -41,7 +50,7 @@ export default function JobDetailsBankPage() {
       } catch { toast.error(`Failed: ${file.name}`); }
     }
     setUploading(false);
-    loadJds();
+    loadJds(search);
     e.target.value = "";
   };
 
@@ -49,7 +58,7 @@ export default function JobDetailsBankPage() {
     try {
       await api.delete(`/api/job-descriptions/${id}`);
       toast.success("Deleted");
-      loadJds();
+      loadJds(search);
     } catch { toast.error("Failed to delete"); }
   };
 
@@ -74,6 +83,25 @@ export default function JobDetailsBankPage() {
             <span>{uploading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Uploading...</> : <><Upload className="w-4 h-4 mr-2" />Upload JDs</>}</span>
           </Button>
         </label>
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Input
+          placeholder="Search by role, company, description, requirements..."
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          className="pl-9 pr-9"
+        />
+        {search && (
+          <button
+            onClick={() => handleSearchChange("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <Card className="mb-6">

@@ -5,6 +5,8 @@
 *env*
 !.env.example
 !.env.sample
+frontend/.env.local
+backend/.env.local
 
 # ===== NODE / FRONTEND =====
 node_modules/

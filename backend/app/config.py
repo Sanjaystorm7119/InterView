@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "onboarding@resend.dev"
 
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+
+    # Sentry
+    SENTRY_DSN: str = ""
+
     # Frontend URL
     FRONTEND_URL: str = "http://localhost:3000"
     HOST_URL: str = "http://localhost:3000/interview"

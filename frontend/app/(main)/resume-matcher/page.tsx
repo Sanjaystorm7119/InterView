@@ -3,59 +3,16 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import api from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Mail, Zap, RefreshCw, Phone, User, X, Trash2 } from "lucide-react";
+import { Loader2, Mail, Zap, RefreshCw, Phone, User } from "lucide-react";
 
-interface Resume {
-  id: number;
-  candidate_name?: string;
-  candidate_email?: string; // primary — set by parse-resume upload
-  email?: string;
-  phone?: string;
-  parsed_data?: {
-    current_role?: string;
-    candidate_email?: string;
-    email?: string;
-    phone?: string;
-  };
-}
-interface JD {
-  id: number;
-  role_title?: string;
-  interview_id?: string;
-  interview_link?: string;
-  parsed_data?: { company_name?: string; interview_link?: string };
-}
-interface Match {
-  id: number;
-  resume_id: number;
-  jd_id: number;
-  confidence_score: number;
-  skills_score?: number;
-  experience_score?: number;
-  semantic_score?: number;
-  matched_skills?: string[];
-  missing_skills?: string[];
-  summary?: string;
-  created_at: string;
-}
-interface BulkCandidate {
-  match: Match;
-  name: string;
-  email: string;
-  phone: string;
-  role: string;
-  company: string;
-  interviewLink: string;
-  checked: boolean;
-}
+import { Resume, JD, Match, BulkCandidate, scoreColor } from "./_components/types";
+import SingleEmailDialog from "./_components/SingleEmailDialog";
+import BulkEmailDialog from "./_components/BulkEmailDialog";
+import MatchResultCard from "./_components/MatchResultCard";
+import MatchHistoryList from "./_components/MatchHistoryList";
+
+const HISTORY_PAGE_SIZE = 20;
 
 export default function ResumeMatcherPage() {
   const [resumes, setResumes] = useState<Resume[]>([]);
@@ -65,6 +22,8 @@ export default function ResumeMatcherPage() {
   const [matching, setMatching] = useState(false);
   const [result, setResult] = useState<{ match: Match; summary?: string } | null>(null);
   const [history, setHistory] = useState<Match[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyPage, setHistoryPage] = useState(0);
 
   // Auto-match
   const [autoMatchEnabled, setAutoMatchEnabled] = useState(true);
@@ -94,22 +53,35 @@ export default function ResumeMatcherPage() {
   useEffect(() => { autoMatchEnabledRef.current = autoMatchEnabled; }, [autoMatchEnabled]);
   useEffect(() => { thresholdRef.current = threshold; }, [threshold]);
 
+  // ── Data fetching ────────────────────────────────────────────────────────────
+
+  const fetchHistoryPage = useCallback(async (page: number) => {
+    const skip = page * HISTORY_PAGE_SIZE;
+    const h = await api.get(`/api/matching/history?skip=${skip}&limit=${HISTORY_PAGE_SIZE}`);
+    setHistory(h.data.items as Match[]);
+    setHistoryTotal(h.data.total as number);
+    setHistoryPage(page);
+  }, []);
+
   const fetchAll = useCallback(async () => {
     try {
       const [r, j, h] = await Promise.all([
         api.get("/api/resumes/"),
         api.get("/api/job-descriptions/"),
-        api.get("/api/matching/history?limit=100"),
+        api.get("/api/matching/history?skip=0&limit=100"),
       ]);
       return {
         resumes: r.data as Resume[],
         jds: j.data as JD[],
-        history: h.data as Match[],
+        history: h.data.items as Match[],
+        total: h.data.total as number,
       };
     } catch {
       return null;
     }
   }, []);
+
+  // ── Auto-match ───────────────────────────────────────────────────────────────
 
   const runAutoMatch = useCallback(
     async (resumeList: Resume[], jdList: JD[], historyList: Match[]) => {
@@ -137,10 +109,7 @@ export default function ResumeMatcherPage() {
       for (let i = 0; i < unmatchedPairs.length; i++) {
         const pair = unmatchedPairs[i];
         try {
-          await api.post("/api/matching/match", {
-            resume_id: pair.resumeId,
-            jd_id: pair.jdId,
-          });
+          await api.post("/api/matching/match", { resume_id: pair.resumeId, jd_id: pair.jdId });
           succeeded++;
         } catch {
           // skip silently
@@ -154,18 +123,18 @@ export default function ResumeMatcherPage() {
 
       if (succeeded > 0) {
         try {
-          const h = await api.get("/api/matching/history?limit=100");
-          const refreshedHistory: Match[] = h.data;
+          const h = await api.get("/api/matching/history?skip=0&limit=100");
+          const refreshedHistory: Match[] = h.data.items;
           setHistory(refreshedHistory);
+          setHistoryTotal(h.data.total);
+          setHistoryPage(0);
 
           const matchedPairKeys = new Set(unmatchedPairs.map((p) => p.key));
           const newHistoryEntries = refreshedHistory.filter((m) =>
             matchedPairKeys.has(`${m.resume_id}-${m.jd_id}`),
           );
           const currentThreshold = thresholdRef.current;
-          const goodMatches = newHistoryEntries.filter(
-            (m) => m.confidence_score >= currentThreshold,
-          );
+          const goodMatches = newHistoryEntries.filter((m) => m.confidence_score >= currentThreshold);
           if (goodMatches.length > 0) {
             setAutoMatchResults((prev) => {
               const merged = [...goodMatches, ...prev];
@@ -196,6 +165,7 @@ export default function ResumeMatcherPage() {
       setResumes(data.resumes);
       setJds(data.jds);
       setHistory(data.history);
+      setHistoryTotal(data.total);
       data.history.forEach((m) => processedPairs.current.add(`${m.resume_id}-${m.jd_id}`));
       runAutoMatch(data.resumes, data.jds, data.history);
     });
@@ -207,13 +177,16 @@ export default function ResumeMatcherPage() {
       if (!data) return;
       setResumes(data.resumes);
       setJds(data.jds);
-      setHistory(data.history);
+      if (historyPage === 0) {
+        setHistory(data.history);
+        setHistoryTotal(data.total);
+      }
       if (autoMatchEnabledRef.current) {
         runAutoMatch(data.resumes, data.jds, data.history);
       }
     }, 30_000);
     return () => clearInterval(id);
-  }, [fetchAll, runAutoMatch]);
+  }, [fetchAll, runAutoMatch, historyPage]);
 
   const handleRunNow = async () => {
     const data = await fetchAll();
@@ -221,9 +194,9 @@ export default function ResumeMatcherPage() {
     setResumes(data.resumes);
     setJds(data.jds);
     setHistory(data.history);
+    setHistoryTotal(data.total);
+    setHistoryPage(0);
 
-    // Immediately populate results from history — all pairs above current threshold,
-    // deduped (best score per pair), sorted highest-score first.
     const currentThreshold = threshold;
     const seen = new Map<string, Match>();
     const sorted = (data.history as Match[])
@@ -235,7 +208,6 @@ export default function ResumeMatcherPage() {
     }
     setAutoMatchResults(Array.from(seen.values()));
 
-    // Also kick off matching for any new unmatched pairs
     runAutoMatch(data.resumes, data.jds, data.history);
   };
 
@@ -254,8 +226,10 @@ export default function ResumeMatcherPage() {
       });
       setResult(data);
       toast.success("Match complete!");
-      const h = await api.get("/api/matching/history?limit=100");
-      setHistory(h.data);
+      const h = await api.get("/api/matching/history?skip=0&limit=100");
+      setHistory(h.data.items);
+      setHistoryTotal(h.data.total);
+      setHistoryPage(0);
     } catch {
       toast.error("Failed to run match");
     } finally {
@@ -263,7 +237,7 @@ export default function ResumeMatcherPage() {
     }
   };
 
-  // ── Email helpers ──────────────────────────────────────────────────────────
+  // ── Email helpers ─────────────────────────────────────────────────────────────
 
   const getEmail = (r: Resume | undefined) =>
     r?.candidate_email ?? r?.email ?? r?.parsed_data?.candidate_email ?? r?.parsed_data?.email ?? "";
@@ -332,7 +306,7 @@ export default function ResumeMatcherPage() {
         phone: getPhone(resume),
         role: jd?.role_title ?? `Position #${m.jd_id}`,
         company: jd?.parsed_data?.company_name ?? "our company",
-        interviewLink: getInterviewLink(jd), // resolved per candidate's JD
+        interviewLink: getInterviewLink(jd),
         checked: !!email,
       };
     });
@@ -355,7 +329,6 @@ export default function ResumeMatcherPage() {
     let succeeded = 0;
     for (let i = 0; i < selected.length; i++) {
       const c = selected[i];
-      // c.interviewLink is already resolved per JD — no further lookup needed
       const personalBody = bulkBody
         .replace(/\[Candidate Name\]/g, c.name)
         .replace(/\[Role\]/g, c.role)
@@ -391,6 +364,7 @@ export default function ResumeMatcherPage() {
     try {
       await api.delete("/api/matching/history");
       setHistory([]);
+      setHistoryTotal(0);
       setAutoMatchResults([]);
       processedPairs.current.clear();
       toast.success("Match history cleared");
@@ -399,28 +373,7 @@ export default function ResumeMatcherPage() {
     }
   };
 
-  // ── Derived display data ───────────────────────────────────────────────────
-
-  const displayHistory = (() => {
-    const seen = new Map<string, Match>();
-    const sorted = history
-      .slice()
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    for (const m of sorted) {
-      const key = `${m.resume_id}-${m.jd_id}`;
-      if (!seen.has(key)) seen.set(key, m);
-    }
-    return Array.from(seen.values());
-  })();
-
-  const scoreColor = (s: number) =>
-    s >= 70
-      ? "text-green-600 bg-green-50"
-      : s >= 40
-        ? "text-amber-600 bg-amber-50"
-        : "text-red-600 bg-red-50";
-
-  const checkedCount = bulkCandidates.filter((c) => c.checked && c.email).length;
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div>
@@ -438,63 +391,40 @@ export default function ResumeMatcherPage() {
                 aria-label="Toggle auto-match"
                 className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${autoMatchEnabled ? "bg-amber-500" : "bg-gray-200"}`}
               >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${autoMatchEnabled ? "translate-x-4" : "translate-x-0.5"}`}
-                />
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${autoMatchEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
               </button>
             </div>
-
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500">Threshold:</span>
               <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={threshold}
+                type="range" min={0} max={100} step={5} value={threshold}
                 onChange={(e) => setThreshold(Number(e.target.value))}
                 className="w-28 accent-amber-500"
               />
               <span className="text-sm font-semibold w-10 tabular-nums">{threshold}%</span>
             </div>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleRunNow}
-              disabled={autoMatching}
-              className="ml-auto"
-            >
+            <Button size="sm" variant="outline" onClick={handleRunNow} disabled={autoMatching} className="ml-auto">
               {autoMatching ? (
-                <>
-                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                  {autoMatchProgress.done}/{autoMatchProgress.total}
-                </>
+                <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />{autoMatchProgress.done}/{autoMatchProgress.total}</>
               ) : (
-                <>
-                  <RefreshCw className="w-3 h-3 mr-1.5" />
-                  Run Now
-                </>
+                <><RefreshCw className="w-3 h-3 mr-1.5" />Run Now</>
               )}
             </Button>
           </div>
-
         </CardContent>
       </Card>
 
-      {/* ── Run Now results ── */}
+      {/* ── Auto-match results ── */}
       {autoMatchResults.length > 0 && (
         <Card className="mb-6 border-amber-100">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="font-semibold text-sm">
-                  Matched Candidates
-                  <span className="ml-1.5 text-gray-400 font-normal">
-                    ≥ {threshold}% · {autoMatchResults.length} result{autoMatchResults.length !== 1 ? "s" : ""}
-                  </span>
-                </h2>
-              </div>
+              <h2 className="font-semibold text-sm">
+                Matched Candidates
+                <span className="ml-1.5 text-gray-400 font-normal">
+                  ≥ {threshold}% · {autoMatchResults.length} result{autoMatchResults.length !== 1 ? "s" : ""}
+                </span>
+              </h2>
               <button
                 onClick={() => openBulkEmailDialog(autoMatchResults)}
                 className="flex items-center gap-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-black font-medium px-3 py-1.5 rounded"
@@ -503,28 +433,19 @@ export default function ResumeMatcherPage() {
                 Email All ({autoMatchResults.length})
               </button>
             </div>
-
             <div className="space-y-2">
-              {autoMatchResults.map((m, i) => {
+              {autoMatchResults.map((m) => {
                 const resume = resumes.find((r) => r.id === m.resume_id);
                 const jd = jds.find((j) => j.id === m.jd_id);
                 return (
-                  <div
-                    key={`${m.resume_id}-${m.jd_id}`}
-                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border text-sm"
-                  >
-                    {/* Score */}
+                  <div key={`${m.resume_id}-${m.jd_id}`} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border text-sm">
                     <span className={`font-bold px-2 py-1 rounded text-sm shrink-0 ${scoreColor(m.confidence_score)}`}>
                       {Number(m.confidence_score).toFixed(0)}%
                     </span>
-
-                    {/* Candidate info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 font-semibold text-sm text-gray-800">
                         <User className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                        <span className="truncate">
-                          {resume?.candidate_name ?? `Candidate #${m.resume_id}`}
-                        </span>
+                        <span className="truncate">{resume?.candidate_name ?? `Candidate #${m.resume_id}`}</span>
                         <span className="text-gray-300 font-normal">·</span>
                         <span className="text-gray-500 font-normal truncate">
                           {jd?.role_title ?? `JD #${m.jd_id}`}
@@ -533,29 +454,20 @@ export default function ResumeMatcherPage() {
                       </div>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1 text-xs text-gray-500">
                         {getEmail(resume) ? (
-                          <span className="flex items-center gap-1">
-                            <Mail className="w-3 h-3" />
-                            {getEmail(resume)}
-                          </span>
+                          <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{getEmail(resume)}</span>
                         ) : (
                           <span className="italic text-gray-300">no email on file</span>
                         )}
                         {getPhone(resume) && (
-                          <span className="flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
-                            {getPhone(resume)}
-                          </span>
+                          <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{getPhone(resume)}</span>
                         )}
                       </div>
                     </div>
-
-                    {/* Individual email */}
                     <button
                       onClick={() => openEmailDialog(m)}
-                      className="flex items-center gap-1.5 text-xs text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-400 rounded px-2.5 py-1.5 shrink-0 transition-colors"
+                      className="ml-auto flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 border border-amber-200 rounded px-2 py-1 shrink-0"
                     >
-                      <Mail className="w-3 h-3" />
-                      Email
+                      <Mail className="w-3 h-3" />Email
                     </button>
                   </div>
                 );
@@ -568,6 +480,7 @@ export default function ResumeMatcherPage() {
       {/* ── Manual match ── */}
       <Card className="mb-6">
         <CardContent className="p-5">
+          <h2 className="font-semibold mb-4">Manual Match</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="text-sm font-medium mb-1 block">Select Resume</label>
@@ -600,327 +513,55 @@ export default function ResumeMatcherPage() {
               </select>
             </div>
           </div>
-          <Button
-            onClick={runMatch}
-            disabled={matching}
-            className="bg-amber-500 hover:bg-amber-600 text-black"
-          >
-            {matching ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Matching...</>
-            ) : (
-              "Run Match"
-            )}
+          <Button onClick={runMatch} disabled={matching} className="bg-amber-500 hover:bg-amber-600 text-black">
+            {matching ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Matching...</> : "Run Match"}
           </Button>
         </CardContent>
       </Card>
 
       {/* ── Manual match result ── */}
-      {result && (
-        <Card className="mb-6">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold">Match Result</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => openEmailDialog(result.match)}
-                  className="flex items-center gap-1.5 text-sm text-amber-600 hover:text-amber-700 border border-amber-200 rounded px-2.5 py-1"
-                >
-                  <Mail className="w-4 h-4" />
-                  Email Candidate
-                </button>
-                <span className={`text-2xl font-bold px-4 py-1 rounded-lg ${scoreColor(result.match.confidence_score)}`}>
-                  {result.match.confidence_score}%
-                </span>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              {[
-                { label: "Skills", value: result.match.skills_score },
-                { label: "Experience", value: result.match.experience_score },
-                { label: "Semantic", value: result.match.semantic_score },
-              ].map((s) => (
-                <div key={s.label} className="text-center">
-                  <p className="text-xs text-gray-500">{s.label}</p>
-                  <p className={`text-lg font-bold ${scoreColor(s.value ?? 0)}`}>{s.value}%</p>
-                </div>
-              ))}
-            </div>
-            {(result.match.matched_skills?.length ?? 0) > 0 && (
-              <div className="mb-3">
-                <p className="text-xs font-medium text-green-700 mb-1">Matched Skills:</p>
-                <div className="flex flex-wrap gap-1">
-                  {result.match.matched_skills!.map((s, i) => (
-                    <span key={i} className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded">{s}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {(result.match.missing_skills?.length ?? 0) > 0 && (
-              <div className="mb-3">
-                <p className="text-xs font-medium text-red-700 mb-1">Missing Skills:</p>
-                <div className="flex flex-wrap gap-1">
-                  {result.match.missing_skills!.map((s, i) => (
-                    <span key={i} className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded">{s}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {result.summary && (
-              <p className="text-sm text-gray-600 mt-3">{result.summary}</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {result && <MatchResultCard result={result} onEmailClick={openEmailDialog} />}
 
       {/* ── Match history ── */}
-      {displayHistory.length > 0 && (
-        <>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Match History</h2>
-            <button
-              onClick={clearHistory}
-              className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-600 border border-red-200 hover:border-red-400 rounded px-2.5 py-1.5 transition-colors"
-            >
-              <Trash2 className="w-3 h-3" />
-              Clear History
-            </button>
-          </div>
-          <div className="space-y-2">
-            {displayHistory.map((m) => {
-              const resume = resumes.find((r) => r.id === m.resume_id);
-              const jd = jds.find((j) => j.id === m.jd_id);
-              return (
-                <Card key={m.id}>
-                  <CardContent className="p-3 flex items-center gap-4 text-sm">
-                    <span className={`font-bold px-2 py-0.5 rounded shrink-0 ${scoreColor(m.confidence_score)}`}>
-                      {Number(m.confidence_score).toFixed(0)}%
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-gray-700 font-medium truncate">
-                        {resume?.candidate_name ?? `Resume #${m.resume_id}`}
-                        <span className="font-normal text-gray-400"> vs </span>
-                        {jd?.role_title ?? `JD #${m.jd_id}`}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-400 mt-0.5">
-                        {getEmail(resume) && (
-                          <span className="flex items-center gap-1">
-                            <Mail className="w-3 h-3" />
-                            {getEmail(resume)}
-                          </span>
-                        )}
-                        {getPhone(resume) && (
-                          <span className="flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
-                            {getPhone(resume)}
-                          </span>
-                        )}
-                        <span>{new Date(m.created_at).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => openEmailDialog(m)}
-                      className="ml-auto flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 border border-amber-100 rounded px-2 py-1 shrink-0"
-                    >
-                      <Mail className="w-3 h-3" />
-                      Email
-                    </button>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </>
-      )}
+      <MatchHistoryList
+        history={history}
+        historyTotal={historyTotal}
+        historyPage={historyPage}
+        pageSize={HISTORY_PAGE_SIZE}
+        resumes={resumes}
+        getEmail={getEmail}
+        getPhone={getPhone}
+        onEmailClick={openEmailDialog}
+        onPageChange={fetchHistoryPage}
+        onClear={clearHistory}
+      />
 
-      {/* ── Single email dialog ── */}
-      <Dialog open={emailDialog} onOpenChange={setEmailDialog}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="w-5 h-5 text-amber-500" />
-              Send Email to Candidate
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-sm font-medium mb-1 block">To</label>
-              <Input
-                type="email"
-                value={emailTo}
-                onChange={(e) => setEmailTo(e.target.value)}
-                placeholder="candidate@email.com"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-1 block">Subject</label>
-              <Input
-                value={emailSubject}
-                onChange={(e) => setEmailSubject(e.target.value)}
-                placeholder="Email subject"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-1 block">Body</label>
-              <textarea
-                value={emailBody}
-                onChange={(e) => setEmailBody(e.target.value)}
-                rows={8}
-                className="w-full border rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
-                placeholder="Email body..."
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" onClick={() => setEmailDialog(false)} disabled={sendingEmail}>Cancel</Button>
-              <Button
-                onClick={sendEmail}
-                disabled={sendingEmail}
-                className="bg-amber-500 hover:bg-amber-600 text-black"
-              >
-                {sendingEmail
-                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending...</>
-                  : <><Mail className="w-4 h-4 mr-2" />Send Email</>}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Bulk email dialog ── */}
-      <Dialog open={bulkDialog} onOpenChange={setBulkDialog}>
-        <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="w-5 h-5 text-amber-500" />
-              Email All Matching Candidates
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-3 overflow-y-auto flex-1 pr-1">
-            {/* Recipients */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-sm font-medium">
-                  Recipients
-                  <span className="text-gray-400 font-normal ml-1.5">
-                    ({checkedCount} selected)
-                  </span>
-                </label>
-                <button
-                  className="text-xs text-amber-600 hover:text-amber-700"
-                  onClick={() =>
-                    setBulkCandidates((prev) =>
-                      prev.map((c) => ({ ...c, checked: !!(c.email) })),
-                    )
-                  }
-                >
-                  Select all with email
-                </button>
-              </div>
-              <div className="border rounded-md divide-y max-h-44 overflow-y-auto">
-                {bulkCandidates.map((c, i) => (
-                  <label
-                    key={i}
-                    className={`flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 ${!c.email ? "opacity-50" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 accent-amber-500"
-                      checked={c.checked}
-                      disabled={!c.email}
-                      onChange={() =>
-                        setBulkCandidates((prev) =>
-                          prev.map((x, j) => (j === i ? { ...x, checked: !x.checked } : x)),
-                        )
-                      }
-                    />
-                    <div className="flex-1 min-w-0 text-sm">
-                      <p className="font-medium truncate">{c.name}</p>
-                      <div className="flex flex-wrap gap-x-3 text-xs text-gray-500 mt-0.5">
-                        {c.email ? (
-                          <span className="flex items-center gap-1">
-                            <Mail className="w-3 h-3" />{c.email}
-                          </span>
-                        ) : (
-                          <span className="italic text-gray-300">no email on file</span>
-                        )}
-                        {c.phone && (
-                          <span className="flex items-center gap-1">
-                            <Phone className="w-3 h-3" />{c.phone}
-                          </span>
-                        )}
-                      </div>
-                      {c.interviewLink ? (
-                        <p className="text-xs text-blue-500 truncate mt-0.5">{c.interviewLink}</p>
-                      ) : (
-                        <p className="text-xs text-amber-500 mt-0.5">No interview linked to this JD</p>
-                      )}
-                    </div>
-                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${scoreColor(c.match.confidence_score)}`}>
-                      {Number(c.match.confidence_score).toFixed(0)}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); setBulkCandidates((prev) => prev.filter((_, j) => j !== i)); }}
-                      className="ml-1 text-gray-300 hover:text-red-400 shrink-0 mt-0.5 transition-colors"
-                      title="Remove from list"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </label>
-                ))}
-              </div>
-              <p className="text-xs text-gray-400 mt-1">
-                <strong>[Candidate Name]</strong>, <strong>[Role]</strong>, <strong>[Company]</strong>, and <strong>[Interview Link]</strong> are replaced per recipient. Each candidate's interview link is shown below their name.
-              </p>
-            </div>
-
-            {/* Subject */}
-            <div>
-              <label className="text-sm font-medium mb-1 block">Subject</label>
-              <Input
-                value={bulkSubject}
-                onChange={(e) => setBulkSubject(e.target.value)}
-                placeholder="Email subject"
-              />
-            </div>
-
-            {/* Body */}
-            <div>
-              <label className="text-sm font-medium mb-1 block">Body</label>
-              <textarea
-                value={bulkBody}
-                onChange={(e) => setBulkBody(e.target.value)}
-                rows={7}
-                className="w-full border rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
-                placeholder="Email body..."
-              />
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-between pt-3 border-t mt-1">
-            <span className="text-xs text-gray-500">
-              {sendingBulk
-                ? `Sending ${bulkProgress.done}/${bulkProgress.total}…`
-                : "Interview links are auto-filled per candidate"}
-            </span>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setBulkDialog(false)} disabled={sendingBulk}>
-                Cancel
-              </Button>
-              <Button
-                onClick={sendBulkEmail}
-                disabled={sendingBulk || checkedCount === 0}
-                className="bg-amber-500 hover:bg-amber-600 text-black"
-              >
-                {sendingBulk
-                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{bulkProgress.done}/{bulkProgress.total}</>
-                  : <><Mail className="w-4 h-4 mr-2" />Send to {checkedCount}</>}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* ── Dialogs ── */}
+      <SingleEmailDialog
+        open={emailDialog}
+        onOpenChange={setEmailDialog}
+        to={emailTo}
+        subject={emailSubject}
+        body={emailBody}
+        sending={sendingEmail}
+        onToChange={setEmailTo}
+        onSubjectChange={setEmailSubject}
+        onBodyChange={setEmailBody}
+        onSend={sendEmail}
+      />
+      <BulkEmailDialog
+        open={bulkDialog}
+        onOpenChange={setBulkDialog}
+        candidates={bulkCandidates}
+        subject={bulkSubject}
+        body={bulkBody}
+        sending={sendingBulk}
+        progress={bulkProgress}
+        onCandidatesChange={setBulkCandidates}
+        onSubjectChange={setBulkSubject}
+        onBodyChange={setBulkBody}
+        onSend={sendBulkEmail}
+      />
     </div>
   );
 }

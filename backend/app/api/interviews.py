@@ -17,7 +17,9 @@ from app.schemas.interview import (
 )
 from app.utils.deps import get_current_user, get_optional_user
 from app.config import get_settings
+from app.services.notification_service import publish
 import httpx
+from datetime import datetime, timezone
 
 settings = get_settings()
 router = APIRouter(prefix="/api/interviews", tags=["interviews"])
@@ -257,7 +259,7 @@ def feedback_count(
 
 
 @router.post("/{interview_id}/feedback", response_model=FeedbackResponse)
-def create_feedback(
+async def create_feedback(
     interview_id: str,
     body: FeedbackCreate,
     db: Session = Depends(get_db),
@@ -283,6 +285,19 @@ def create_feedback(
     db.add(fb)
     db.commit()
     db.refresh(fb)
+
+    # Notify the recruiter via SSE
+    await publish(
+        interview.user_email,
+        {
+            "type": "interview_completed",
+            "interview_id": interview_id,
+            "candidate_name": body.user_name or "A candidate",
+            "job_position": interview.job_position or "the position",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
     return fb
 
 
@@ -353,5 +368,17 @@ async def save_transcript(body: SaveTranscriptRequest, db: Session = Depends(get
         fb.transcript = transcript
         fb.call_id = body.callId
         db.commit()
+
+    # Notify the recruiter via SSE
+    await publish(
+        interview.user_email,
+        {
+            "type": "interview_completed",
+            "interview_id": body.interviewId,
+            "candidate_name": body.userName or "A candidate",
+            "job_position": interview.job_position or "the position",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
     return {"success": True, "message": "Transcript saved successfully"}

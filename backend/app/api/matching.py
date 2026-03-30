@@ -109,20 +109,44 @@ def match_resume_to_jd(
     }
 
 
-@router.get("/history", response_model=list[MatchResponse])
+@router.get("/history")
 def match_history(
+    skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    matches = (
-        db.query(CandidateJobMatch)
-        .filter(CandidateJobMatch.user_email == current_user.email)
-        .order_by(CandidateJobMatch.created_at.desc())
+    base = db.query(CandidateJobMatch).filter(
+        CandidateJobMatch.user_email == current_user.email
+    )
+    total = base.count()
+    items = (
+        base.order_by(CandidateJobMatch.created_at.desc())
+        .offset(skip)
         .limit(limit)
         .all()
     )
-    return matches
+    return {
+        "items": [
+            {
+                "id": m.id,
+                "user_email": m.user_email,
+                "resume_id": m.resume_id,
+                "jd_id": m.jd_id,
+                "confidence_score": float(m.confidence_score or 0),
+                "skills_score": float(m.skills_score or 0),
+                "experience_score": float(m.experience_score or 0),
+                "semantic_score": float(m.semantic_score or 0),
+                "matched_skills": m.matched_skills,
+                "missing_skills": m.missing_skills,
+                "created_at": str(m.created_at),
+            }
+            for m in items
+        ],
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.delete("/history")

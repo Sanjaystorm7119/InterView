@@ -1,25 +1,34 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Upload, Trash2, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Upload, Trash2, Loader2, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 export default function ResumeBankPage() {
   const [resumes, setResumes] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [filters, setFilters] = useState({ role: "", skills: "", location: "", degree: "", college: "", minYears: "", maxYears: "" });
+  const [search, setSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => { loadResumes(); }, []);
+  useEffect(() => { loadResumes(search); }, []);
 
-  const loadResumes = async () => {
+  const loadResumes = async (q = "") => {
     try {
-      const { data } = await api.get("/api/resumes/");
+      const params = q.trim() ? `?search=${encodeURIComponent(q.trim())}` : "";
+      const { data } = await api.get(`/api/resumes/${params}`);
       setResumes(data);
     } catch { /* ignore */ }
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => loadResumes(value), 400);
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -38,10 +47,17 @@ export default function ResumeBankPage() {
           parsed_data: parsed,
         });
         toast.success(`Parsed: ${parsed.candidate_name || file.name}`);
-      } catch { toast.error(`Failed: ${file.name}`); }
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail;
+        if (err?.response?.status === 409) {
+          toast.warning(detail || `Duplicate: ${file.name} already exists`);
+        } else {
+          toast.error(`Failed: ${file.name}`);
+        }
+      }
     }
     setUploading(false);
-    loadResumes();
+    loadResumes(search);
     e.target.value = "";
   };
 
@@ -49,7 +65,7 @@ export default function ResumeBankPage() {
     try {
       await api.delete(`/api/resumes/${id}`);
       toast.success("Resume deleted");
-      loadResumes();
+      loadResumes(search);
     } catch { toast.error("Failed to delete"); }
   };
 
@@ -76,6 +92,25 @@ export default function ResumeBankPage() {
             <span>{uploading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Uploading...</> : <><Upload className="w-4 h-4 mr-2" />Upload Resumes</>}</span>
           </Button>
         </label>
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Input
+          placeholder="Search by name, email, skills, role..."
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          className="pl-9 pr-9"
+        />
+        {search && (
+          <button
+            onClick={() => handleSearchChange("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Filters */}
