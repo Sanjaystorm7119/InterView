@@ -88,3 +88,4 @@ desktop.ini
 .cache/
 .temp/
 *.tsbuildinfo
+.agent
